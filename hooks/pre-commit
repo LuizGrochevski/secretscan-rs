@@ -1,0 +1,51 @@
+#!/bin/bash
+#
+# pre-commit hook do secretscan-rs
+#
+# Roda o secretscan-rs contra os arquivos staged antes de permitir o
+# commit. Bloqueia o commit se encontrar algum achado HIGH.
+#
+# Instalação: veja hooks/README.md
+
+set -e
+
+# Caminho pro binário do secretscan-rs. Ajuste se o seu estiver em outro lugar.
+SECRETSCAN_BIN="${SECRETSCAN_BIN:-secretscan-rs}"
+
+if ! command -v "$SECRETSCAN_BIN" &> /dev/null; then
+    echo "⚠️  secretscan-rs não encontrado no PATH."
+    echo "   Defina SECRETSCAN_BIN com o caminho do binário ou instale-o no PATH."
+    echo "   Pulando verificação de segredos (não recomendado)."
+    exit 0
+fi
+
+echo "🔐 Rodando secretscan-rs nos arquivos staged..."
+
+# Pega só os arquivos que estão staged para o commit (Added/Copied/Modified)
+STAGED_FILES=$(git diff --cached --name-only --diff-filter=ACM)
+
+if [ -z "$STAGED_FILES" ]; then
+    exit 0
+fi
+
+FOUND_HIGH=0
+
+for file in $STAGED_FILES; do
+    if [ -f "$file" ]; then
+        OUTPUT=$("$SECRETSCAN_BIN" "$file" --fail-on high 2>&1) || FOUND_HIGH=1
+        if [ "$FOUND_HIGH" -eq 1 ]; then
+            echo "$OUTPUT"
+        fi
+    fi
+done
+
+if [ "$FOUND_HIGH" -eq 1 ]; then
+    echo ""
+    echo "❌ Commit bloqueado: segredo(s) de severidade HIGH detectado(s) acima."
+    echo "   Remova o segredo, ou se for falso positivo, adicione o comentário"
+    echo "   '// secretscan-ignore' (ou equivalente) na linha e tente novamente."
+    exit 1
+fi
+
+echo "✅ Nenhum segredo HIGH encontrado. Prosseguindo com o commit."
+exit 0

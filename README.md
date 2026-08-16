@@ -124,7 +124,7 @@ token = "valor-de-teste-nao-real"  # secretscan-ignore
 - [x] Scan de histórico do git (commits antigos, não só working directory)
 - [ ] Detecção por entropia (fallback para secrets sem padrão fixo conhecido)
 - [x] Testes automatizados (unit tests por regra)
-- [ ] Pre-commit hook de exemplo
+- [x] Pre-commit hook de exemplo
 
 ---
 
