@@ -1,5 +1,6 @@
 mod patterns;
 mod scanner;
+mod git_history;
 
 use clap::Parser;
 use colored::*;
@@ -28,11 +29,23 @@ struct Args {
     /// Sai com código 1 se encontrar algo >= essa severidade (HIGH ou MEDIUM)
     #[arg(long)]
     fail_on: Option<String>,
+
+    /// Também escaneia o histórico completo do git (todos os commits)
+    #[arg(long)]
+    git_history: bool,
 }
 
 fn main() -> anyhow::Result<()> {
     let args = Args::parse();
     let findings = scanner::scan_path(&args.path, &args.exclude)?;
+
+    let mut findings = findings;
+    if args.git_history {
+        match git_history::scan_git_history(&args.path) {
+            Ok(mut hist_findings) => findings.append(&mut hist_findings),
+            Err(e) => eprintln!("Aviso: nao foi possivel escanear historico git: {}", e),
+        }
+    }
 
     match args.output.as_str() {
         "json" => {
