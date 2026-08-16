@@ -1,3 +1,4 @@
+use crate::entropy::detect_high_entropy;
 use crate::patterns::{mask, PATTERNS};
 use anyhow::Result;
 use ignore::WalkBuilder;
@@ -16,7 +17,7 @@ pub struct Finding {
 
 const SUPPRESS_MARKER: &str = "secretscan-ignore";
 
-pub fn scan_path(root: &Path, exclude: &[String]) -> Result<Vec<Finding>> {
+pub fn scan_path(root: &Path, exclude: &[String], entropy: bool) -> Result<Vec<Finding>> {
     let mut findings = Vec::new();
 
     let mut walker = WalkBuilder::new(root);
@@ -49,11 +50,14 @@ pub fn scan_path(root: &Path, exclude: &[String]) -> Result<Vec<Finding>> {
                 continue;
             }
 
+            let mut matched_known_pattern = false;
+
             for pattern in PATTERNS.iter() {
                 // Se o regex tem grupos de captura, usa o último grupo
                 // como o valor real do segredo (evita mascarar a linha
                 // inteira, ex: "password = " junto com o valor).
                 if let Some(caps) = pattern.regex.captures(line) {
+                    matched_known_pattern = true;
                     let matched_value = caps
                         .iter()
                         .skip(1)
@@ -68,6 +72,21 @@ pub fn scan_path(root: &Path, exclude: &[String]) -> Result<Vec<Finding>> {
                         rule: pattern.name.to_string(),
                         severity: pattern.severity.to_string(),
                         masked_value: mask(matched_value),
+                    });
+                }
+            }
+
+            // Fallback por entropia: só roda se nenhum padrão conhecido
+            // já bateu nessa linha (evita relatório duplicado) e só se
+            // o usuário ativou explicitamente com --entropy.
+            if entropy && !matched_known_pattern {
+                for (value, score) in detect_high_entropy(line) {
+                    findings.push(Finding {
+                        file: path_str.clone(),
+                        line: idx + 1,
+                        rule: format!("high_entropy_string ({:.2} bits/char)", score),
+                        severity: "LOW".to_string(),
+                        masked_value: mask(&value),
                     });
                 }
             }
@@ -94,11 +113,11 @@ mod tests {
         let dir = make_temp_dir("finds_secret");
         fs::write(
             dir.join("config.py"),
-            r#"aws_access_key_id = "AKIAIOSFODNN7EXAMPLE""#,
+            r#"aws_access_key_id = "AKIAIOSFODNN7EXAMPLE""#, // secretscan-ignore
         )
         .unwrap();
 
-        let findings = scan_path(&dir, &[]).unwrap();
+        let findings = scan_path(&dir, &[], false).unwrap();
         assert_eq!(findings.len(), 1);
         assert_eq!(findings[0].rule, "aws_access_key_id");
         assert_eq!(findings[0].severity, "HIGH");
@@ -113,7 +132,7 @@ mod tests {
         )
         .unwrap();
 
-        let findings = scan_path(&dir, &[]).unwrap();
+        let findings = scan_path(&dir, &[], false).unwrap();
         assert_eq!(findings.len(), 0);
     }
 
@@ -123,11 +142,11 @@ mod tests {
         fs::create_dir_all(dir.join("vendor")).unwrap();
         fs::write(
             dir.join("vendor/lib.py"),
-            r#"password = "SuperSecreta123""#,
+            r#"password = "SuperSecreta123""#, // secretscan-ignore
         )
         .unwrap();
 
-        let findings = scan_path(&dir, &["vendor".to_string()]).unwrap();
+        let findings = scan_path(&dir, &["vendor".to_string()], false).unwrap();
         assert_eq!(findings.len(), 0);
     }
 
@@ -136,7 +155,7 @@ mod tests {
         let dir = make_temp_dir("clean");
         fs::write(dir.join("main.py"), "print('hello world')").unwrap();
 
-        let findings = scan_path(&dir, &[]).unwrap();
+        let findings = scan_path(&dir, &[], false).unwrap();
         assert_eq!(findings.len(), 0);
     }
 }

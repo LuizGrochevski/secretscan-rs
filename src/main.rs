@@ -1,6 +1,7 @@
 mod patterns;
 mod scanner;
 mod git_history;
+mod entropy;
 
 use clap::Parser;
 use colored::*;
@@ -33,11 +34,16 @@ struct Args {
     /// Também escaneia o histórico completo do git (todos os commits)
     #[arg(long)]
     git_history: bool,
+
+    /// Ativa deteccao por entropia (fallback para segredos sem padrao
+    /// conhecido). Opt-in porque gera mais falso positivo.
+    #[arg(long)]
+    entropy: bool,
 }
 
 fn main() -> anyhow::Result<()> {
     let args = Args::parse();
-    let findings = scanner::scan_path(&args.path, &args.exclude)?;
+    let findings = scanner::scan_path(&args.path, &args.exclude, args.entropy)?;
 
     let mut findings = findings;
     if args.git_history {
