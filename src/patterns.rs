@@ -72,3 +72,109 @@ pub fn mask(value: &str) -> String {
     let end = &value[value.len() - 3..];
     format!("{}{}{}", start, "*".repeat(value.len() - 6), end)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn matches_rule(rule_name: &str, line: &str) -> bool {
+        PATTERNS
+            .iter()
+            .find(|p| p.name == rule_name)
+            .map(|p| p.regex.is_match(line))
+            .unwrap_or(false)
+    }
+
+    #[test]
+    fn detects_aws_access_key() {
+        assert!(matches_rule(
+            "aws_access_key_id",
+            r#"aws_access_key_id = "AKIAIOSFODNN7EXAMPLE""#
+        ));
+    }
+
+    #[test]
+    fn does_not_flag_short_random_string_as_aws_key() {
+        assert!(!matches_rule("aws_access_key_id", "AKIA123"));
+    }
+
+    #[test]
+    fn detects_github_pat_classic() {
+        assert!(matches_rule(
+            "github_pat_classic",
+            "token = ghp_1234567890abcdef1234567890abcdef1234"
+        ));
+    }
+
+    #[test]
+    fn detects_stripe_live_key() {
+        let fake_key = format!("sk_live_{}", "A".repeat(24));
+        let line = format!("STRIPE_KEY={}", fake_key);
+        assert!(matches_rule("stripe_live_key", &line));
+    }
+
+    #[test]
+    fn detects_slack_token() {
+        let fake_token = format!("{}-{}-{}", "xoxb", "0000000000", "a".repeat(16));
+        let line = format!("SLACK_WEBHOOK={}", fake_token);
+        assert!(matches_rule("slack_token", &line));
+    }
+
+    #[test]
+    fn detects_google_api_key() {
+        assert!(matches_rule(
+            "google_api_key",
+            "key: AIzaSyD-1234567890abcdefghijklmnopqrstu"
+        ));
+    }
+
+    #[test]
+    fn detects_private_key_block() {
+        assert!(matches_rule(
+            "private_key_block",
+            "-----BEGIN RSA PRIVATE KEY-----"
+        ));
+    }
+
+    #[test]
+    fn detects_jwt_token() {
+        assert!(matches_rule(
+            "jwt_token",
+            "auth = eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxMjM0In0.abc123def456"
+        ));
+    }
+
+    #[test]
+    fn detects_generic_password_assignment() {
+        assert!(matches_rule(
+            "generic_secret_assignment",
+            r#"password = "SuperSecreta123""#
+        ));
+    }
+
+    #[test]
+    fn does_not_flag_short_generic_value() {
+        // valor com menos de 6 caracteres não deve disparar
+        assert!(!matches_rule("generic_secret_assignment", r#"password = "abc""#));
+    }
+
+    #[test]
+    fn does_not_flag_unrelated_line() {
+        for pattern in PATTERNS.iter() {
+            assert!(!pattern.regex.is_match("fn main() { println!(\"hello world\"); }"));
+        }
+    }
+
+    #[test]
+    fn mask_short_value_fully_hidden() {
+        assert_eq!(mask("abc123"), "******");
+    }
+
+    #[test]
+    fn mask_long_value_shows_edges() {
+        let masked = mask("AKIAIOSFODNN7EXAMPLE");
+        assert!(masked.starts_with("AKI"));
+        assert!(masked.ends_with("PLE"));
+        assert!(masked.contains('*'));
+    }
+}

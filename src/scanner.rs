@@ -76,3 +76,67 @@ pub fn scan_path(root: &Path, exclude: &[String]) -> Result<Vec<Finding>> {
 
     Ok(findings)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::fs;
+
+    fn make_temp_dir(name: &str) -> std::path::PathBuf {
+        let dir = std::env::temp_dir().join(format!("secretscan_test_{}", name));
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).unwrap();
+        dir
+    }
+
+    #[test]
+    fn finds_secret_in_file() {
+        let dir = make_temp_dir("finds_secret");
+        fs::write(
+            dir.join("config.py"),
+            r#"aws_access_key_id = "AKIAIOSFODNN7EXAMPLE""#,
+        )
+        .unwrap();
+
+        let findings = scan_path(&dir, &[]).unwrap();
+        assert_eq!(findings.len(), 1);
+        assert_eq!(findings[0].rule, "aws_access_key_id");
+        assert_eq!(findings[0].severity, "HIGH");
+    }
+
+    #[test]
+    fn respects_suppression_marker() {
+        let dir = make_temp_dir("suppression");
+        fs::write(
+            dir.join("config.py"),
+            r#"aws_access_key_id = "AKIAIOSFODNN7EXAMPLE"  # secretscan-ignore"#,
+        )
+        .unwrap();
+
+        let findings = scan_path(&dir, &[]).unwrap();
+        assert_eq!(findings.len(), 0);
+    }
+
+    #[test]
+    fn respects_exclude_argument() {
+        let dir = make_temp_dir("exclude");
+        fs::create_dir_all(dir.join("vendor")).unwrap();
+        fs::write(
+            dir.join("vendor/lib.py"),
+            r#"password = "SuperSecreta123""#,
+        )
+        .unwrap();
+
+        let findings = scan_path(&dir, &["vendor".to_string()]).unwrap();
+        assert_eq!(findings.len(), 0);
+    }
+
+    #[test]
+    fn returns_empty_for_clean_directory() {
+        let dir = make_temp_dir("clean");
+        fs::write(dir.join("main.py"), "print('hello world')").unwrap();
+
+        let findings = scan_path(&dir, &[]).unwrap();
+        assert_eq!(findings.len(), 0);
+    }
+}
